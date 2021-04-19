@@ -1,10 +1,11 @@
 import { TestTask } from "./task.js"
 
 export class BehaviorTree {
-    constructor() {
+    constructor(settings = {}) {
         game_log("Behavior Tree initializing");
-        this.rootTask = TestTask;
-        this.context = {}
+        this.rootTask = settings.rootTask;
+        this.settings = settings;
+        this.context = {character: settings.character};
     }
 
     run() {

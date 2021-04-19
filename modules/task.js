@@ -5,8 +5,7 @@ export const RUNNING = "running";
 export class Task {
     constructor(options) {
         this.options = options;
-        this.hasStarted = false;
-        this.willEnd = false;
+        this.restart();
     }
 
     start(context) {
@@ -37,6 +36,11 @@ export class Task {
     endIfDone(context, result) {
         if (result == SUCCESS || result == FAILURE) this.end(context);
     }
+
+    restart() {
+        this.hasStarted = false;
+        this.willEnd = false;
+    }
 }
 
 export class Sequence extends Task {
@@ -50,15 +54,18 @@ export class Sequence extends Task {
 
     start(context) {
         super.start(context);
-        this.remainingTasks = this.tasks;
+        this.remainingTasks = [...this.tasks];
+        for (let task of this.remainingTasks) {
+            task.restart();
+        }
     }
 
     run(context) {
         this.startIfNotStarted(context);
         let result = SUCCESS;
         let done = false;
-        while(!done && this.tasks.length > 0) {
-            let task = this.tasks.shift();
+        while(!done && this.remainingTasks.length > 0) {
+            let task = this.remainingTasks.shift();
             let taskResult = task.run(context);
             switch (taskResult) {
                 case SUCCESS:
@@ -83,8 +90,8 @@ export class Selector extends Sequence {
         this.startIfNotStarted(context)
         let result = FAILURE;
         let done = false;
-        while(!done && this.tasks.length > 0) {
-            let task = this.tasks.shift();
+        while(!done && this.remainingTasks.length > 0) {
+            let task = this.remainingTasks.shift();
             let taskResult = task.run(context);
             switch (taskResult) {
                 case SUCCESS:
@@ -112,6 +119,11 @@ export class Decorator extends Task {
             throw new Error("Decorator has no tasks!");
         }
     }
+
+    start(context) {
+        super.start(context);
+        this.task.restart();
+    }
 }
 
 export class Inverter extends Decorator {
@@ -128,8 +140,27 @@ export class Inverter extends Decorator {
 export class Repeat extends Decorator {
     run(context) {
         this.startIfNotStarted(context);
-        this.task.run(context);
+        let taskResult = this.task.run(context);
+        if (taskResult == FAILURE || taskResult == SUCCESS) {
+            this.task.restart();
+        }
+        let result = this.transformTaskResult(taskResult);
+        this.endIfDone(context, result);
+        return result;
+    }
+
+    transformTaskResult(result) {
         return RUNNING;
+    }
+}
+
+export class RepeatUntilFail extends Repeat {
+    transformTaskResult(result) {
+        if (result != FAILURE) {
+            return RUNNING;
+        } else {
+            return SUCCESS;
+        }
     }
 }
 
@@ -165,13 +196,32 @@ export let TestTask = new Sequence({
             game_log("5: After Inverted Failure in Sequence");
             return SUCCESS
         }}),
+        new RepeatUntilFail({
+            start: (context) => context.repeatUntilFailureCount = 0,
+            task: new Task({
+                run: (context) => {
+                    context.repeatUntilFailureCount++;
+                    if (context.repeatUntilFailureCount <= 3) {
+                        game_log("Repeat Until Failure count: " + context.repeatUntilFailureCount + "/3");
+                        return SUCCESS;
+                    } else {
+                        return FAILURE;
+                    }
+                }
+            })
+        }),
         new Repeat({
             start: function(context) { context.repeatCount = 0 },
             task: new Task({
                 run: (context) => {
                     context.repeatCount++;
-                    game_log("Final Repeat ran " + context.repeatCount + " times");
-                    return SUCCESS;
+                    if (context.repeatCount <= 3) {
+                        game_log("Final Repeat ran " + context.repeatCount + "/3 SUCCESSes");
+                        return SUCCESS;
+                    } else {
+                        game_log("Final Repeat FAILUREs: " + context.repeatCount);
+                        return FAILURE;
+                    }
                 }
             })
         })
