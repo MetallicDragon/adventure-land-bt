@@ -105,6 +105,7 @@ export class Selector extends Sequence {
 export class Decorator extends Task {
     constructor(options) {
         super(options);
+        this.task = options.task;
         if (!this.task) {
             throw new Error("Decorator has no tasks!");
         }
@@ -124,26 +125,33 @@ export class Inverter extends Decorator {
 
 export let TestTask = new Sequence({tasks:[
     new Task({run: (context) => {
-        game_log("1"); 
+        game_log("1: Sequence Start"); 
         return SUCCESS;
     }}),
     new Task({run: (context) => {
-        game_log("2"); 
+        game_log("2: Sequence Continues"); 
         return SUCCESS;
     }}),
     new Selector({tasks: [
             new Task({run: (context) => {
-                game_log("3")
+                game_log("3: Selector First Task Fails")
                 return FAILURE;
             }}),
             new Task({run: (context) => {
-                game_log("4"); 
+                game_log("4: Selector Second Task Succeeds"); 
                 return SUCCESS;
             }}),
             new Task({run: (context) => {
-                game_log("E1 ")
+                game_log("E1: After fail in Selector!")
                 return FAILURE;
             }}),
         ]
-    })
+    }),
+    new Inverter({
+        task: new Task({run: () => FAILURE})
+    }),
+    new Task({run: (context) => {
+        game_log("5: After Inverted Failure in Sequence");
+        return SUCCESS
+    }})
 ]});
