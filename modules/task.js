@@ -111,7 +111,7 @@ export class Decorator extends Task {
     }
 }
 
-export class Invertor extends Decorator {
+export class Inverter extends Decorator {
     run(context) {
         this.startIfNotStarted(context);
         let result = this.task.run();
