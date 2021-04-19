@@ -11,10 +11,11 @@ export class Task {
 
     start(context) {
         this.hasStarted = true;
+        if (this.options.start) this.options.start(context);
     }
 
     startIfNotStarted(context) {
-        if (!this.hasStarted) this.start();
+        if (!this.hasStarted) this.start(context);
     }
 
     run(context) {
@@ -30,10 +31,11 @@ export class Task {
     }
 
     end(context) {
+        if (this.options.end) this.options.end(context);
     }
 
     endIfDone(context, result) {
-        if (result == SUCCESS || result == FAILURE) this.end();
+        if (result == SUCCESS || result == FAILURE) this.end(context);
     }
 }
 
@@ -52,7 +54,7 @@ export class Sequence extends Task {
     }
 
     run(context) {
-        this.startIfNotStarted();
+        this.startIfNotStarted(context);
         let result = SUCCESS;
         let done = false;
         while(!done && this.tasks.length > 0) {
@@ -115,7 +117,7 @@ export class Decorator extends Task {
 export class Inverter extends Decorator {
     run(context) {
         this.startIfNotStarted(context);
-        let result = this.task.run();
+        let result = this.task.run(context);
         if (result == SUCCESS) result = FAILURE;
         if (result == FAILURE) result = SUCCESS;
         this.endIfDone(context, result);
@@ -123,35 +125,55 @@ export class Inverter extends Decorator {
     }
 }
 
-export let TestTask = new Sequence({tasks:[
-    new Task({run: (context) => {
-        game_log("1: Sequence Start"); 
-        return SUCCESS;
-    }}),
-    new Task({run: (context) => {
-        game_log("2: Sequence Continues"); 
-        return SUCCESS;
-    }}),
-    new Selector({tasks: [
-            new Task({run: (context) => {
-                game_log("3: Selector First Task Fails")
-                return FAILURE;
-            }}),
-            new Task({run: (context) => {
-                game_log("4: Selector Second Task Succeeds"); 
-                return SUCCESS;
-            }}),
-            new Task({run: (context) => {
-                game_log("E1: After fail in Selector!")
-                return FAILURE;
-            }}),
-        ]
-    }),
-    new Inverter({
-        task: new Task({run: () => FAILURE})
-    }),
-    new Task({run: (context) => {
-        game_log("5: After Inverted Failure in Sequence");
-        return SUCCESS
-    }})
-]});
+export class Repeat extends Decorator {
+    run(context) {
+        this.startIfNotStarted(context);
+        this.task.run(context);
+        return RUNNING;
+    }
+}
+
+export let TestTask = new Sequence({
+    tasks: [
+        new Task({run: (context) => {
+            game_log("1: Sequence Start"); 
+            return SUCCESS;
+        }}),
+        new Task({run: (context) => {
+            game_log("2: Sequence Continues"); 
+            return SUCCESS;
+        }}),
+        new Selector({tasks: [
+                new Task({run: (context) => {
+                    game_log("3: Selector First Task Fails")
+                    return FAILURE;
+                }}),
+                new Task({run: (context) => {
+                    game_log("4: Selector Second Task Succeeds"); 
+                    return SUCCESS;
+                }}),
+                new Task({run: (context) => {
+                    game_log("E1: After fail in Selector!")
+                    return FAILURE;
+                }}),
+            ]
+        }),
+        new Inverter({
+            task: new Task({run: () => FAILURE})
+        }),
+        new Task({run: (context) => {
+            game_log("5: After Inverted Failure in Sequence");
+            return SUCCESS
+        }}),
+        new Repeat({
+            start: function(context) { context.repeatCount = 0 },
+            task: new Task({
+                run: (context) => {
+                    context.repeatCount++;
+                    game_log("Final Repeat ran " + context.repeatCount + " times");
+                    return SUCCESS;
+                }
+            })
+        })
+    ]
+});
