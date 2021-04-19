@@ -1,4 +1,3 @@
-
 export const SUCCESS = "success";
 export const FAILURE = "failure";
 export const RUNNING = "running";
@@ -6,22 +5,36 @@ export const RUNNING = "running";
 export class Task {
     constructor(options) {
         this.options = options;
-        if (this.options.start) this.start = this.options.start;
-        if (this.options.run) this.run = this.options.run;
-        if (this.options.end) this.end = this.options.end;
+        this.hasStarted = false;
+        this.willEnd = false;
     }
 
     start(context) {
+        this.hasStarted = true;
+    }
 
-    };
+    startIfNotStarted(context) {
+        if (!this.hasStarted) this.start();
+    }
 
     run(context) {
-
-    };
+        this.startIfNotStarted(context)
+        let result = FAILURE;
+        if (this.options.run) {
+            result = this.options.run(context);
+        } else {
+            throw new Error("Task has no run option defined!");
+        }
+        this.endIfDone(context, result);
+        return result;
+    }
 
     end(context) {
+    }
 
-    };
+    endIfDone(context, result) {
+        if (result == SUCCESS || result == FAILURE) this.end();
+    }
 }
 
 export class Sequence extends Task {
@@ -34,51 +47,78 @@ export class Sequence extends Task {
     }
 
     start(context) {
+        super.start(context);
         this.remainingTasks = this.tasks;
     }
 
     run(context) {
-        while(this.tasks.length > 0) {
+        this.startIfNotStarted();
+        let result = SUCCESS;
+        let done = false;
+        while(!done && this.tasks.length > 0) {
             let task = this.tasks.shift();
-            let result = task.run();
-            switch (result) {
+            let taskResult = task.run(context);
+            switch (taskResult) {
                 case SUCCESS:
                     break;
                 case FAILURE:
-                    return FAILURE;
+                    result = FAILURE;
+                    done = true;
+                    break;
                 case RUNNING:
                     this.remainingTasks.unshift(task);
-                    return RUNNING;
+                    done = true;
+                    result = RUNNING;
             }
         }
-        return SUCCESS;
-    }
-
-    end(context) {}
-
-    remainingTasks() {
-        let currentTaskIndex = this.tasks.indexOf(this.currentTask);
-        if (currentTaskIndex < 0) currentTaskIndex = 0;
-        return this.tasks.slice(currentTaskIndex);
+        this.endIfDone(context, result);
+        return result;
     }
 }
 
 export class Selector extends Sequence {
     run(context) {
-        while(this.tasks.length > 0) {
+        this.startIfNotStarted(context)
+        let result = FAILURE;
+        let done = false;
+        while(!done && this.tasks.length > 0) {
             let task = this.tasks.shift();
-            let result = task.run();
-            switch (result) {
+            let taskResult = task.run(context);
+            switch (taskResult) {
                 case SUCCESS:
-                    return SUCCESS;
+                    result = SUCCESS;
+                    done = true;
+                    break;
                 case FAILURE:
                     break;
                 case RUNNING:
                     this.remainingTasks.unshift(task);
-                    return RUNNING;
+                    result = RUNNING;
+                    break;
             }
         }
-        return FAILURE;
+        this.endIfDone(context, result);
+        return result
+    }
+}
+
+export class Decorator extends Task {
+    constructor(options) {
+        super(options);
+        if (!this.task) {
+            throw new Error("Decorator has no tasks!");
+        }
+    }
+}
+
+export class Invertor extends Decorator {
+    run(context) {
+        this.startIfNotStarted(context);
+        let result = this.task.run();
+        if (result == SUCCESS) result = FAILURE;
+        if (result == FAILURE) result = SUCCESS;
+        this.endIfDone(context, result);
+        return result;
     }
 }
 
