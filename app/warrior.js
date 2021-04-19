@@ -1,4 +1,4 @@
-import { Task, Sequence, SUCCESS, FAILURE, RUNNING, TestTask, Repeat, RepeatUntilFail } from "../modules/task.js"
+import { Task, Sequence, SUCCESS, FAILURE, RUNNING, Repeat, RepeatUntilFail } from "../modules/task.js"
 import { BehaviorTree } from  "../modules/behavior_tree.js"
 
 
@@ -31,57 +31,98 @@ let grindableMonster = function(context, entity) {
         //&& 	(entity.attack < this.manager.options.monster_max_attack)
 }
 
+class AcquireNearbyTarget extends Task {
+    defaultOptions() {
+        return {
+            run: (context) => {
+                let closestValidMonster = getClosestEntity(context, this.options.filter);
+                if (closestValidMonster) {
+                    game_log("Monster found: " + closestValidMonster.name);
+                    context.combatTarget = closestValidMonster;
+                    change_target(context.combatTarget);
+                    return SUCCESS;
+                } else {
+                    game_log("No monsters found nearby!");
+                    return FAILURE;
+                }
+            },
+            filter: grindableMonster
+        }
+    }
+}
+
+class HasValidCombatTarget extends Task {
+    defaultOptions() {
+        return {
+            run: (context) => {
+                if (!context.combatTarget || context.combatTarget.dead) {
+                    return FAILURE;
+                } else {
+                    return SUCCESS
+                }
+            }
+        }
+    }
+}
+
+class MoveInRange extends Task {
+    defaultOptions() {
+        return {
+            run: (context) => {
+                let target = this.options.target(context);
+                if (!target) return FAILURE;
+                if (is_moving(context.character)) {
+                    return RUNNING;
+                } else if (!is_in_range(target)) {
+                    move(
+                        context.character.x + (target.x-context.character.x)/2, 
+                        context.character.y + (target.y-context.character.y)/2
+                    );
+                    return RUNNING
+                } else {
+                    return SUCCESS;
+                }
+            }
+        }
+    }
+}
+
+class MoveToAndAttackTarget extends Sequence {
+    defaultOptions() {
+        return {
+            tasks: [
+                new HasValidCombatTarget,
+                new MoveInRange({target: (context) => context.combatTarget}),
+                new Task({
+                    run: (context) => {
+                        if(can_attack(context.combatTarget)) {
+                            attack(context.combatTarget);
+                        }
+                        return SUCCESS;
+                    }
+                })
+            ]
+        }
+    }
+}
+
+class FightCurrentTarget extends RepeatUntilFail {
+    defaultOptions() {
+        return {
+            task: new MoveToAndAttackTarget
+        }
+    }
+}
+
 let warriorBehaviorTree = new BehaviorTree({character: character});
 let rootTask = new Repeat({
     task: new Sequence({
-        start: () => {
-            game_log("Main Sequence Started");
-        },
         tasks: [
-            new Task({
-                run: (context) => {
-                    let closestValidMonster = getClosestEntity(context, grindableMonster);
-                    if (closestValidMonster) {
-                        game_log("Monster found: " + closestValidMonster.name);
-                        context.combatTarget = closestValidMonster;
-                        change_target(context.combatTarget);
-                        return SUCCESS;
-                    } else {
-                        game_log("No monsters found nearby!");
-                        return FAILURE;
-                    }
-                }
-            }),
-            new RepeatUntilFail({
-                task: new Sequence({
-                    tasks: [
-                        new Task({
-                            run: (context) => {
-                                if (!context.combatTarget || context.combatTarget.dead) {
-                                    game_log("Target gone");
-                                    return FAILURE;
-                                }
-                                if (!is_in_range(context.combatTarget)) {
-                                    move(
-                                        context.character.x + (context.combatTarget.x-context.character.x)/2, 
-                                        context.character.y + (context.combatTarget.y-context.character.y)/2
-                                    );
-                                    game_log("Moving to target");
-                                } else if(can_attack(context.combatTarget)) {
-                                    attack(context.combatTarget);
-                                    game_log("Attacking target");
-                                }
-                                return RUNNING;
-                            }
-                        })
-                    ]
-                }),
-            }),
-            new Task({
-                run: () => {
-                    loot();
-                    return SUCCESS;
-                }
+            new AcquireNearbyTarget(),
+            new FightCurrentTarget,
+            new Task(() => {
+                loot();
+                return SUCCESS;
             })
         ]
     })

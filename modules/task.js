@@ -3,8 +3,18 @@ export const FAILURE = "failure";
 export const RUNNING = "running";
 
 export class Task {
-    constructor(options) {
-        this.options = options;
+    constructor(optionsOrRunFunction) {
+        if (typeof optionsOrRunFunction == "function") {
+            this.options = {
+                ...this.defaultOptions(),
+                run: optionsOrRunFunction
+            }
+        } else {
+            this.options = {
+                ...this.defaultOptions(),
+                ...optionsOrRunFunction
+            };
+        }
         this.restart();
     }
 
@@ -41,12 +51,16 @@ export class Task {
         this.hasStarted = false;
         this.willEnd = false;
     }
+
+    defaultOptions() {
+        return {};
+    };
 }
 
 export class Sequence extends Task {
     constructor(options) {
         super(options);
-        this.tasks = options.tasks;
+        this.tasks = this.options.tasks;
         if (!this.tasks || this.tasks.length == 0) {
             throw new Error("Sequence has no tasks!");
         }
@@ -114,7 +128,7 @@ export class Selector extends Sequence {
 export class Decorator extends Task {
     constructor(options) {
         super(options);
-        this.task = options.task;
+        this.task = this.options.task;
         if (!this.task) {
             throw new Error("Decorator has no tasks!");
         }
