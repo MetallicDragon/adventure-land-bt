@@ -2,6 +2,14 @@ export const SUCCESS = "success";
 export const FAILURE = "failure";
 export const RUNNING = "running";
 
+export function TaskFactory(parent, options) {
+    return class extends parent {
+        defaultOptions() {
+            return options;
+        }
+    }
+}
+
 export class Task {
     constructor(optionsOrRunFunction) {
         if (typeof optionsOrRunFunction == "function") {
