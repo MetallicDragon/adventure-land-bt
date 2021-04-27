@@ -125,6 +125,7 @@ export class Selector extends Sequence {
                 case RUNNING:
                     this.remainingTasks.unshift(task);
                     result = RUNNING;
+                    done = true;
                     break;
             }
         }
