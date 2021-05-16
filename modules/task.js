@@ -69,9 +69,14 @@ export class Sequence extends Task {
     constructor(options) {
         super(options);
         this.tasks = this.options.tasks;
+        if (typeof this.tasks === 'function') {
+            this.tasks = this.tasks(options);
+        }
+
         if (!this.tasks || this.tasks.length == 0) {
             throw new Error("Sequence has no tasks!");
         }
+
     }
 
     start(context) {
@@ -138,9 +143,14 @@ export class Decorator extends Task {
     constructor(options) {
         super(options);
         this.task = this.options.task;
+        if (typeof this.task === 'function') {
+            this.task = this.task(options);
+        }
+
         if (!this.task) {
             throw new Error("Decorator has no tasks!");
         }
+
     }
 
     start(context) {
@@ -168,6 +178,16 @@ export class Succeed extends Decorator {
         this.startIfNotStarted(context);
         this.task.run(context);
         let result = SUCCESS;
+        this.endIfDone(context, result);
+        return result;
+    }
+}
+
+export class Fail extends Decorator {
+    run(context) {
+        this.startIfNotStarted(context);
+        this.task.run(context);
+        let result = FAILURE;
         this.endIfDone(context, result);
         return result;
     }
