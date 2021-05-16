@@ -107,7 +107,7 @@ export class Sequence extends Task {
     }
 }
 
-export class Selector extends Sequence {
+export class Select extends Sequence {
     run(context) {
         this.startIfNotStarted(context)
         let result = FAILURE;
@@ -149,12 +149,25 @@ export class Decorator extends Task {
     }
 }
 
-export class Inverter extends Decorator {
+export class Invert extends Decorator {
     run(context) {
         this.startIfNotStarted(context);
         let result = this.task.run(context);
-        if (result == SUCCESS) result = FAILURE;
-        if (result == FAILURE) result = SUCCESS;
+        if (result == SUCCESS) {
+            result = FAILURE;
+        } else if (result == FAILURE) {
+            result = SUCCESS;
+        }
+        this.endIfDone(context, result);
+        return result;
+    }
+}
+
+export class Succeed extends Decorator {
+    run(context) {
+        this.startIfNotStarted(context);
+        this.task.run(context);
+        let result = SUCCESS;
         this.endIfDone(context, result);
         return result;
     }
@@ -187,6 +200,42 @@ export class RepeatUntilFail extends Repeat {
     }
 }
 
+export let PushToStack = TaskFactory(Task, {
+    run: function(context) {
+        if (!context[this.stackVar]) {
+            context[this.stackVar] = [];
+        }
+        context[this.stackVar] = context[this.stackVar].concat(this.elements(context));
+        return SUCCESS;
+    },
+    stackVar: null,
+    elements: function() { throw new Error("PushToStack: getStack not specified!")},
+});
+
+export let PopFromStack = TaskFactory(Task, {
+    run: function(context) {
+        if (!context[this.stackVar] || context[this.stackVar].length < 1) {
+            return FAILURE;
+        } else {
+            context[this.poppedVar] = context[this.stackVar].pop();
+            return SUCCESS;
+        }
+    },
+    stackVar: null,
+    poppedVar: null,
+});
+
+export let IsEmpty = TaskFactory(Task, {
+    run: function(context) {
+        if (!context[this.stackVar] || context[this.stackVar].length < 1) {
+            return SUCCESS;
+        } else {
+            return FAILURE;
+        }
+    },
+    stackVar: null,
+});
+
 export let TestTask = new Sequence({
     tasks: [
         new Task({run: (context) => {
@@ -197,28 +246,68 @@ export let TestTask = new Sequence({
             game_log("2: Sequence Continues"); 
             return SUCCESS;
         }}),
-        new Selector({tasks: [
+        new Select({tasks: [
                 new Task({run: (context) => {
-                    game_log("3: Selector First Task Fails")
+                    game_log("3: Select First Task Fails")
                     return FAILURE;
                 }}),
                 new Task({run: (context) => {
-                    game_log("4: Selector Second Task Succeeds"); 
+                    game_log("4: Select Second Task Succeeds"); 
                     return SUCCESS;
                 }}),
                 new Task({run: (context) => {
-                    game_log("E1: After fail in Selector!")
+                    game_log("E1: After fail in Select!")
                     return FAILURE;
                 }}),
             ]
         }),
-        new Inverter({
+        new Invert({
             task: new Task({run: () => FAILURE})
         }),
         new Task({run: (context) => {
             game_log("5: After Inverted Failure in Sequence");
             return SUCCESS
         }}),
+        new Sequence({
+            tasks: [
+                new PushToStack({
+                    stackVar: "testStack",
+                    elements: function(context) {
+                        game_log("Adding [1,2,3] to testStack");
+                        return [1,2,3];
+                    }
+                }),
+                new RepeatUntilFail({
+                    task: new Sequence({
+                        tasks: [
+                            new PopFromStack({
+                                stackVar: "testStack",
+                                poppedVar: "popped"
+                            }),
+                            new Task({
+                                run: function(context) {
+                                    game_log("Popped element: " + context.popped);
+                                    return SUCCESS;
+                                }
+                            })
+                        ]
+                    })
+                }),
+                new Task({
+                    run: function(context) {
+                        game_log("Done popping, testing IsEmpty!");
+                        return SUCCESS;
+                    }
+                }),
+                new IsEmpty({stackVar: "testStack"}),
+                new Task({
+                    run: function(context) {
+                        game_log("IsEmpty Succeeded!");
+                        return SUCCESS;
+                    }
+                }),
+            ]
+        }),
         new RepeatUntilFail({
             start: (context) => context.repeatUntilFailureCount = 0,
             task: new Task({
