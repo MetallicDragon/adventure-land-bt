@@ -10,7 +10,7 @@ let getClosestEntity = function(context, filter) {
     for (key in parent.entities) {
         let entity = parent.entities[key];
 
-        if (!filter(context, entity)) {
+        if (!filter(entity)) {
             continue;
         }
 
@@ -23,11 +23,12 @@ let getClosestEntity = function(context, filter) {
     return closest_monster;
 }
 
-let grindableMonster = function(context, entity) {
+let monsterTypeWhitelist = ["snake"];
+let grindableMonster = function(entity) {
     return 	(entity.type == "monster")
         && 	(!entity.dead)
         //&& 	(this.manager.options.whitelisted_spawns.includes(entity.mtype))
-        &&  (entity.mtype == "snake")
+        &&  (monsterTypeWhitelist.includes(entity.mtype))
         //&& 	(entity.xp >= this.manager.options.monster_min_xp)
         //&& 	(entity.attack < this.manager.options.monster_max_attack)
 }
@@ -110,21 +111,80 @@ let IsAlive = TaskFactory(Task, {
     }
 });
 
-let MoveInRange = TaskFactory(Task, {
-    run: function(context) {
-        let target = context[this.targetVar];
-        if (!target) return FAILURE;
-        if (is_moving(context.character)) {
-            return RUNNING;
-        } else if (!is_in_range(target)) {
-            move(
-                context.character.x + (target.x-context.character.x)/2, 
-                context.character.y + (target.y-context.character.y)/2
-            );
-            return RUNNING
-        } else {
-            return SUCCESS;
+let SmartMove = TaskFactory(Task,  {
+    start: function(context) { 
+        context.smartMoveTarget = this.target(context);
+        context.smartMoving = false;
+        game_log("Starting move");
+        if (context.smartMoveTarget) {
+            context.smartMoving = true;
+            smart_move(context.smartMoveTarget.x, context.smartMoveTarget.y)
+                .then((context) => context.smartMoving = false);
         }
+    },
+    run: function(context) {
+        if (distance(context.character, context.smartMoveTarget) < this.range) {
+            stop("smart");
+            game_log("Move Finished: In range.");
+            return SUCCESS;
+        } else {
+            if (context.smartMoving) {
+                return RUNNING;
+            } else {
+                game_log("Move Failed: Done, but not in range!");
+                return FAILURE;
+            }
+        }
+    },
+    range: 100
+});
+
+let MoveInRange = TaskFactory(Select, {
+    tasks: function(options) {
+        return [
+            new Task({
+                run: function(context) {
+                    if (context[this.targetVar] && is_in_range(context[this.targetVar])) {
+                        return SUCCESS;
+                    } else {
+                        return FAILURE;
+                    }
+                },
+                targetVar: options.targetVar
+            }),
+            new Sequence({
+                tasks: [
+                    new Task({
+                        run: function(context) {
+                            if (distance(context.character, context[this.targetVar]) < 250) {
+                                return FAILURE;
+                            } else {
+                                return SUCCESS
+                            }
+                        },
+                        targetVar: options.targetVar
+                    }),
+                    new SmartMove({target: (context) => context[options.targetVar]})
+                ],
+            }),
+            new Task({
+                run: function(context) {
+                    let target = context[options.targetVar];
+                    if (!target || target.dead) return FAILURE;
+                    if (is_moving(context.character)) {
+                        return RUNNING;
+                    } else if (!is_in_range(target)) {
+                        move(
+                            context.character.x + (target.x-context.character.x)/2, 
+                            context.character.y + (target.y-context.character.y)/2
+                        );
+                        return RUNNING
+                    } else {
+                        return SUCCESS;
+                    }
+                }
+            })
+        ]
     }
 });
 
@@ -162,33 +222,6 @@ let GrindNearbyMonsters = TaskFactory(Sequence, {
             return SUCCESS;
         })
     ]
-});
-
-let SmartMove = TaskFactory(Task,  {
-    start: function(context) { 
-        context.smartMoveTarget = this.target(context);
-        context.smartMoving = false;
-        game_log("Starting move");
-        if (context.smartMoveTarget) {
-            context.smartMoving = true;
-            smart_move(context.smartMoveTarget.x, context.smartMoveTarget.y)
-                .then((context) => context.smartMoving = false);
-        }
-    },
-    run: function(context) {
-        if (distance(context.character, context.smartMoveTarget) < 100) {
-            stop("smart");
-            game_log("Move Finished: In range.");
-            return SUCCESS;
-        } else {
-            if (context.smartMoving) {
-                return RUNNING;
-            } else {
-                game_log("Move Failed: Done, but not in range!");
-                return FAILURE;
-            }
-        }
-    }
 });
 
 let EnsureHavePotions = TaskFactory(Select, {
@@ -244,49 +277,49 @@ let EnsureHavePotions = TaskFactory(Select, {
 });
 
 let FindSpawnWithGrindableMonsters = TaskFactory(Select, {
-    tasks: [
-        new FindNearbyTarget(),
-        new Sequence({
-            tasks: [
-                new PushToStack({
-                    stackVar: "spawns",
-                    elements: function(context) {
-                        let spawns = get_map().monsters.filter(
-                            monster => ["snake"].includes(monster.type)
-                        );
-                        if (spawns.length < 1) {
-                            game_log("No spawns found!");
-                        } else {
-                            game_log("Spawns found: " + spawns.length);
+    tasks: function(options) {
+        return [
+            new FindNearbyTarget({filter: options.filter}),
+            new Sequence({
+                tasks: [
+                    new PushToStack({
+                        stackVar: "spawns",
+                        elements: function(context) {
+                            let spawns = get_map().monsters.filter(options.spawnFilter);
+                            if (spawns.length < 1) {
+                                game_log("No spawns found!");
+                            } else {
+                                game_log("Spawns found: " + spawns.length);
+                            }
+                            return spawns;
                         }
-                        return spawns;
-                    }
-                }),
-                new RepeatUntilFail({
-                    task: new Sequence({
-                        tasks: [
-                            new PopFromStack({
-                                stackVar: "spawns",
-                                poppedVar: "currentSpawn"
-                            }),
-                            new SmartMove({
-                                target: function(context) {
-                                    game_log("Moving to Spawn, remaining: " + context.spawns.length);
-                                    let [x1, y1, x2, y2] = context.currentSpawn.boundary;
-                                    let x = (x1 + x2) / 2;
-                                    let y = (y1 + y2) / 2;
-                                    return {x: x, y: y};
-                                }
-                            }),
-                            new Invert({
-                                task: new FindNearbyTarget()
-                            })
-                        ]
+                    }),
+                    new RepeatUntilFail({
+                        task: new Sequence({
+                            tasks: [
+                                new PopFromStack({
+                                    stackVar: "spawns",
+                                    poppedVar: "currentSpawn"
+                                }),
+                                new SmartMove({
+                                    target: function(context) {
+                                        game_log("Moving to Spawn, remaining: " + context.spawns.length);
+                                        let [x1, y1, x2, y2] = context.currentSpawn.boundary;
+                                        let x = (x1 + x2) / 2;
+                                        let y = (y1 + y2) / 2;
+                                        return {x: x, y: y};
+                                    }
+                                }),
+                                new Invert({
+                                    task: new FindNearbyTarget({filter: options.filter})
+                                })
+                            ]
+                        })
                     })
-                })
-            ]
-        })
-    ]
+                ]
+            })
+        ]
+    }
 })
 
 let warriorBehaviorTree = new BehaviorTree({character: character});
@@ -294,8 +327,11 @@ let rootTask = new Repeat({
     task: new Sequence({
         tasks: [
             new EnsureHavePotions(),
-            new FindSpawnWithGrindableMonsters(),
-            new GrindNearbyMonsters(),
+            new FindSpawnWithGrindableMonsters({
+                filter: grindableMonster,
+                spawnFilter: (spawn) => monsterTypeWhitelist.includes(spawn.type)
+            }),
+            new GrindNearbyMonsters({filter: grindableMonster}),
         ]
     })
 });
