@@ -245,6 +245,14 @@ export let PopFromStack = TaskFactory(Task, {
     poppedVar: null,
 });
 
+export let ClearStack = TaskFactory(Task, {
+    run: function(context) {
+        context[this.stackVar] = [];
+        return SUCCESS;
+    },
+    stackVar: null,
+})
+
 export let IsEmpty = TaskFactory(Task, {
     run: function(context) {
         if (!context[this.stackVar] || context[this.stackVar].length < 1) {

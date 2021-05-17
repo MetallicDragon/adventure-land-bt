@@ -118,22 +118,27 @@ let SmartMove = TaskFactory(Task,  {
         game_log("Starting move");
         if (context.smartMoveTarget) {
             context.smartMoving = true;
-            smart_move(context.smartMoveTarget.x, context.smartMoveTarget.y)
-                .then((context) => context.smartMoving = false);
+            smart_move(context.smartMoveTarget)
+                .then(() => {
+                    context.smartMoving = false;
+                });
         }
     },
     run: function(context) {
-        if (distance(context.character, context.smartMoveTarget) < this.range) {
-            stop("smart");
-            game_log("Move Finished: In range.");
-            return SUCCESS;
-        } else {
-            if (context.smartMoving) {
-                return RUNNING;
-            } else {
-                game_log("Move Failed: Done, but not in range!");
-                return FAILURE;
+        if (context.smartMoveTarget.x && context.smartMoveTarget.y) {
+            let inRange = distance(context.character, context.smartMoveTarget) < this.range
+            if (inRange) {
+                stop("smart");
+                game_log("Move Finished: In specified range.");
+                return SUCCESS;
             }
+        }
+
+        if (context.smartMoving) {
+            return RUNNING;
+        } else {
+            game_log("Move Finished: smart_move complete!");
+            return SUCCESS;
         }
     },
     range: 100
@@ -322,14 +327,179 @@ let FindSpawnWithGrindableMonsters = TaskFactory(Select, {
     }
 })
 
+let SellItems = TaskFactory(Sequence, {
+    tasks: function(options) {
+        return [
+            new SmartMove({
+                target: function(context) {
+                    return find_npc("basics");
+                },
+                range: 50
+            }),
+            new RepeatUntilFail({
+                task: new Sequence({
+                    tasks: [
+                        new PopFromStack({
+                            stackVar: options.stackVar,
+                            poppedVar: "itemToSell"
+                        }),
+                        new Task(function(context) {
+                            let itemIndex = context.itemToSell;
+                            let item = context.character.items[itemIndex]
+                            if (item) {
+                                game_log("Selling " + item.name);
+                                sell(itemIndex)
+                                return RUNNING
+                            } else {
+                                // Sells just one item per 'tick'
+                                return SUCCESS
+                            }
+                        })
+                    ]
+                })
+            })
+        ];
+    },
+    stackVar: null
+})
+
+let DepositItems = TaskFactory(Sequence, {
+    tasks: function(options) {
+        return [
+            new SmartMove({
+                target: function(context) {
+                    return find_npc("items0");
+                },
+                range: 50
+            }),
+            new RepeatUntilFail({
+                task: new Sequence({
+                    tasks: [
+                        new PopFromStack({
+                            stackVar: options.stackVar,
+                            poppedVar: "itemToDeposit"
+                        }),
+                        new Task(function(context) {
+                            let itemIndex = context.itemToDeposit;
+                            let item = context.character.items[itemIndex]
+                            if (item) {
+                                game_log("Depositing " + item.name);
+                                bank_store(itemIndex);
+                                return SUCCESS
+                            } else {
+                                // Deposit just one item per 'tick'
+                                return SUCCESS
+                            }
+                        })
+                    ]
+                })
+            })
+        ];
+    },
+    stackVar: null
+})
+
+let ManageInventory = TaskFactory(Sequence, {
+    tasks: [
+        new PushToStack({
+            stackVar: "itemSlotsToSell",
+            elements: function(context) {
+                let sellItemsWhitelist = [
+                    "hpamulet",
+                    "hpbelt",
+                ];
+                let itemSlotsToSell = [];
+                for (i in context.character.items) {
+                    let item = context.character.items[i];
+                    let shouldSellItem = item && sellItemsWhitelist.includes(item.name);
+                    if (shouldSellItem) {
+                        itemSlotsToSell.push(i);
+                    }
+                }
+                return itemSlotsToSell;
+            }
+        }),
+        new PushToStack({
+            stackVar: "itemSlotsToDeposit",
+            elements: function(context) {
+                let depositItemsBlacklist = [
+                    "hpot0", 
+                    "mpot0", 
+                    "hpot1", 
+                    "mpot1", 
+                    "hpotx", 
+                    "mpotx"
+                ];
+                let itemSlotsToDeposit = [];
+                for (i in context.character.items) {
+                    let item = context.character.items[i];
+                    let shouldDepositItem = item && !depositItemsBlacklist.includes(item.name);
+                    if (shouldDepositItem) {
+                        itemSlotsToDeposit.push(i);
+                    }
+                }
+                return itemSlotsToDeposit;
+            }
+        }),
+        new Select({
+            tasks: [
+                new IsEmpty({stackVar: "itemSlotsToSell"}),
+                new SellItems({stackVar: "itemSlotsToSell"})
+            ]
+        }),
+        new Select({
+            tasks: [
+                new IsEmpty({stackVar: "itemSlotsToDeposit"}),
+                new DepositItems({stackVar: "itemSlotsToDeposit"})
+            ]
+        })
+    ]
+})
+
+let ManageInventoryIfNeeded = TaskFactory(Select, {
+    tasks: [
+        new Task(function(context) {
+            let freeSpaces = characterUtils.countFreeInventorySpaces(context.character);
+            if (freeSpaces < 3) {
+                return FAILURE;
+            } else {
+                return SUCCESS;
+            }
+        }),
+        new ManageInventory(),
+    ]
+})
+
+let EnsureOnMap = TaskFactory(Select, {
+    tasks: function(options) {
+        return [
+            new Task(function(context) {
+                if (context.character.map == options.map) {
+                    return SUCCESS;
+                } else {
+                    return FAILURE;
+                }
+            }),
+            new SmartMove({
+                target: function(context) {
+                    return options.map
+                }
+            })
+        ];
+    },
+    map: null
+})
+
 let warriorBehaviorTree = new BehaviorTree({character: character});
 let rootTask = new Repeat({
     task: new Sequence({
         tasks: [
+            new ManageInventoryIfNeeded(),
             new EnsureHavePotions(),
+            new EnsureOnMap({map: "main"}),
             new FindSpawnWithGrindableMonsters({
-                filter: grindableMonster,
-                spawnFilter: (spawn) => monsterTypeWhitelist.includes(spawn.type)
+               filter: grindableMonster,
+               spawnFilter: (spawn) => monsterTypeWhitelist.includes(spawn.type)
             }),
             new GrindNearbyMonsters({filter: grindableMonster}),
         ]
